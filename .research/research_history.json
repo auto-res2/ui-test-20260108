@@ -4,5 +4,46 @@
     "efficient LLM fine-tuning optimizer",
     "adaptive fine-tuning optimizer LLM"
   ],
-  "research_study_list": []
+  "research_study_list": [
+    {
+      "title": "Revisiting Zeroth-Order Optimization for Memory-Efficient LLM Fine-Tuning: A Benchmark",
+      "full_text": "",
+      "references": [],
+      "meta_data": {
+        "arxiv_id": "",
+        "authors": [],
+        "published_date": "",
+        "github_url": ""
+      },
+      "llm_extracted_info": {
+        "main_contributions": "[Unavailable]",
+        "methodology": "[Unavailable]",
+        "experimental_setup": "[Unavailable]",
+        "limitations": "[Unavailable]",
+        "future_research_directions": "[Unavailable]",
+        "experimental_code": "No repository content available.",
+        "experimental_info": "No repository content available."
+      }
+    },
+    {
+      "title": "LoFiT: Localized Fine-tuning on LLM Representations",
+      "full_text": "",
+      "references": [],
+      "meta_data": {
+        "arxiv_id": "",
+        "authors": [],
+        "published_date": "",
+        "github_url": ""
+      },
+      "llm_extracted_info": {
+        "main_contributions": "[Unavailable]",
+        "methodology": "[Unavailable]",
+        "experimental_setup": "[Unavailable]",
+        "limitations": "[Unavailable]",
+        "future_research_directions": "[Unavailable]",
+        "experimental_code": "",
+        "experimental_info": ""
+      }
+    }
+  ]
 }
