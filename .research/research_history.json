@@ -54,5 +54,96 @@
     "experimental_code": "# Pseudocode for FG-DNR training (concise, executable)\\nimport torch\\nfrom torch.utils.data import DataLoader, TensorDataset\\nfrom transformers import AutoModelForCausalLM, AutoTokenizer\\n\\nmodel_name = 'distilgpt2'\\nmodel = AutoModelForCausalLM.from_pretrained(model_name)\\ntokenizer = AutoTokenizer.from_pretrained(model_name)\\nif tokenizer.pad_token is None:\\n    tokenizer.pad_token = tokenizer.eos_token\\n\\n# Tiny dataset (example tokens)\\ndataset = ...  # prepare input_ids, attention_mask, labels for a small corpus\\ndataloader = DataLoader(dataset, batch_size=4, shuffle=True)\\ncalib_loader = DataLoader(dataset, batch_size=32, shuffle=True)  # small calib batch\\n\\n# Snapshot w0\\nw0 = {n: p.detach().clone() for n, p in model.named_parameters() if p.requires_grad}\\n# Compute diagonal Fisher on calibration batch\\nF_diag = {n: torch.zeros_like(p).detach() for n, p in model.named_parameters() if p.requires_grad}\\nmodel.train()\\n# collect gradients on calib batch without updating params\\nfor batch in calib_loader:\\n    input_ids, attn, labels = batch\\n    model.zero_grad()\\n    outputs = model(input_ids=input_ids, attention_mask=attn, labels=labels)\\n    loss = outputs.loss\\n    loss.backward()\\n    with torch.no_grad():\\n        for name, p in model.named_parameters():\\n            if p.requires_grad and p.grad is not None:\\n                F_diag[name] += p.grad.detach().pow(2)\\n    break  # single batch for calibration\\n# Normalize F_diag by number of calib batches (here 1)\\nfor k in F_diag: F_diag[k] = F_diag[k] / 1.0\\n# Base lambda and alpha\\nlambda_base = 0.01\\nalpha = 0.5\\n# During fine-tuning, add regulated delta-norm loss\\nmodel.train()\\nfor batch in dataloader:\\n    input_ids, attn, labels = batch\\n    outputs = model(input_ids=input_ids, attention_mask=attn, labels=labels)\\n    loss = outputs.loss\\n    reg = 0.0\\n    for name, p in model.named_parameters():\\n        if p.requires_grad:\\n            p0 = w0[name]\\n            F = F_diag[name]\\n            reg = reg + torch.sum(F * (p - p0).pow(2))\\n    loss = loss + lambda_base * reg\\n    # backward and step as usual\\n    optimizer.zero_grad()\\n    loss.backward()\\n    optimizer.step()\\n\\n# Evaluation: compute perplexity on in-domain and out-of-domain val sets\"",
     "expected_result": "We expect FG-DNR to improve perplexity on the in-domain validation set by a modest margin (roughly 5–15% relative) compared to standard fine-tuning, and show improved generalization on the out-of-domain dataset despite similar or slightly higher training compute. The per-parameter lambda_i will be larger for sensitive parameters, producing a more stable training trajectory (smoothed loss curves) and smaller delta magnitudes ||w−w0||. Ablations with uniform lambda should underperform relative to FG-DNR, validating the benefit of data-informed regularization.",
     "expected_conclusion": "FG-DNR is a principled, data-driven, architecture-agnostic enhancement for efficient LLM fine-tuning. By tying update constraints to estimated parameter importance, it delivers better stability and out-of-domain generalization with minimal overhead, offering a stronger and more practically valuable contribution than a simple delta-norm term."
+  },
+  "experimental_design": {
+    "experiment_summary": "Goal: validate Fisher-Guided Delta-Norm Regularization (FG-DNR) for data-informed, per-parameter regularization during fine-tuning of an LLM, focusing on improved out-of-domain transfer with data scarcity. Task: fine-tune a small, open-domain LLM on a tiny open-domain dataset while applying FG-DNR to regularize parameter updates guided by a diagonal Fisher information estimate. Workflow:\n- Start with a pre-trained LLM (e.g., Qwen3-0.6B).\n- Build a tiny calibration batch (e.g., 32 tokens) to estimate diagonal Fisher information F_i ≈ E[(∂L/∂w_i)^2] per parameter via a single gradient pass on the calibration batch.\n- Compute per-parameter weights λ_i = λ_base * (F_i)^α with α ≥ 0 (default α=0.5).\n- During fine-tuning on a tiny dataset (e.g., Alpaca-cleaned subset) minimize L_total = L_task + Σ_i λ_i (w_i − w0_i)^2, where w0 are pretraining weights. Optionally constrain FG-DNR to high-sensitivity parameter subsets or schedule λ_i over steps.\n- Maintain compatibility with standard optimizers and pipelines; only requires storing w0 and lambda penalties.\n- Baselines for comparison: (a) standard fine-tuning (no regularization), (b) uniform delta-norm with a single λ, (c) a LoRA-like adaptation baseline.\n- Evaluation: perplexity on in-domain validation set and out-of-domain validation set; also report update magnitude and layer-wise λ_i distribution.\n- Experimental scale is chosen to fit the provided Runner: use a small model (e.g., ~0.6B parameters) and a compact dataset (e.g., 1–2k in-domain samples, 0.5–1k out-of-domain samples), calibrate on a 32-token batch, and run 50–200 optimization steps with a modest batch size; keep data pipelines straightforward and compatible with existing training loops.\n- Expected outcomes: FG-DNR should reduce perplexity on in-domain and especially improve out-of-domain transfer relative to baselines, while generating sparser, more stable updates (lower ||w−w0||) and a plausible, interpretable lambda distribution across layers.",
+    "runner_config": {
+      "runner_label": [
+        "self-hosted",
+        "gpu-runner"
+      ],
+      "description": "NVIDIA A100 or H200, VRAM: 80 GB or more, RAM: 2048 GB or more"
+    },
+    "evaluation_metrics": [
+      {
+        "name": "perplexity",
+        "description": "Correctness criteria: evaluate perplexity on the in-domain validation set using standard token-level log-likelihood. Calculation: perplexity = exp( cross-entropy loss over the validation set ). Task appropriateness: scalar measure of generative fit to in-domain distribution; visualizations: learning curve of perplexity across training steps."
+      },
+      {
+        "name": "perplexity_out_of_domain",
+        "description": "Correctness criteria: perplexity on the out-of-domain validation set. Calculation: same as above but on out-of-domain data. Task appropriateness: tests generalization; visualizations: perplexity vs steps on out-domain."
+      },
+      {
+        "name": "update_norm",
+        "description": "Correctness criteria: compute the L2 norm of the parameter update vector Δw = w − w0 after fine-tuning. Calculation: ||Δw||_2 = sqrt(Σ_i (w_i − w0_i)^2). Task appropriateness: measures overall update magnitude; visualizations: histogram or per-layer distribution of |Δw| across layers."
+      },
+      {
+        "name": "lambda_distribution",
+        "description": "Correctness criteria: inspect per-parameter λ_i distributions across layers after Fisher-based weighting. Calculation: store all λ_i values and compute layer-wise statistics (means, percentiles). Task appropriateness: helps interpret which parts of the model are constrained more strongly; visualizations: layer-wise histograms or box plots of λ_i."
+      }
+    ],
+    "models_to_use": [
+      "Qwen3-0.6B"
+    ],
+    "datasets_to_use": [
+      "alpaca-cleaned"
+    ],
+    "proposed_method": {
+      "method_name": "FG-DNR (Fisher-Guided Delta-Norm Regularization) v1",
+      "description": "A lightweight, per-parameter update constraint for fine-tuning that scales with parameter importance estimated from a diagonal Fisher information (F_i). Compute F_i on a tiny calibration batch, derive λ_i = λ_base * (F_i)^α (α ≥ 0, e.g., 0.5), and enforce a diagonal delta-norm penalty Σ_i λ_i (w_i − w0_i)^2 with w0 the pretraining weights. The approach remains compatible with standard optimizers/pipelines and can be optionally scheduled or restricted to high-sensitivity subsets. Implementable with minimal extra storage (only w0 and diagonal-regularizer state).",
+      "training_config": {
+        "learning_rate": 2e-05,
+        "batch_size": 8,
+        "epochs": 3,
+        "optimizer": "adamw",
+        "warmup_steps": 100,
+        "weight_decay": 0.01,
+        "gradient_clip": 1.0,
+        "scheduler": "linear",
+        "seed": 42,
+        "additional_params": "{\"lambda_base\": 0.01, \"alpha\": 0.5, \"calibration_batch_size\": 32, \"lambda_schedule\": \"constant\"}"
+      },
+      "optuna_config": {
+        "enabled": true,
+        "n_trials": 12,
+        "search_spaces": [
+          {
+            "param_name": "alpha",
+            "distribution_type": "uniform",
+            "low": 0.0,
+            "high": 1.0
+          },
+          {
+            "param_name": "lambda_base",
+            "distribution_type": "loguniform",
+            "low": -4.0,
+            "high": -1.0
+          }
+        ]
+      }
+    },
+    "comparative_methods": [
+      {
+        "method_name": "Standard Fine-Tuning (No FG-DNR)",
+        "description": "Baseline fine-tuning with identical data/pipeline but without the delta-regularization term.",
+        "training_config": {
+          "learning_rate": 2e-05,
+          "batch_size": 8,
+          "epochs": 3,
+          "optimizer": "adamw",
+          "warmup_steps": 100,
+          "weight_decay": 0.01,
+          "gradient_clip": 1.0,
+          "scheduler": "linear",
+          "seed": 42,
+          "additional_params": "{\"lambda_base\":0.0}"
+        },
+        "optuna_config": {
+          "enabled": false,
+          "n_trials": 0,
+          "search_spaces": []
+        }
+      }
+    ]
   }
 }
