@@ -1,5 +1,8 @@
 {
-  "research_topic": "LLMを効率的に学習できるOptimizerの研究",
-  "queries": [],
+  "research_topic": "LLMの効率的なfine tuningのための新しいOptimizerの研究",
+  "queries": [
+    "efficient LLM fine-tuning optimizer",
+    "adaptive fine-tuning optimizer LLM"
+  ],
   "research_study_list": []
 }
